@@ -1,0 +1,175 @@
+#!/usr/bin/perl -w
+# rename - Larry's filename fixer (+ -n dry-run)
+# Usage: rename [-n] expr [files]
+# If no files are given, reads newline-separated filenames from STDIN.
+
+my $allow_hidden  = 0;
+my $allow_dash    = 0;
+my $allow_ext     = 0;
+my $preserve_ext  = 0;
+my $dryrun        = 0;
+
+# Parse leading options
+while (@ARGV && $ARGV[0] =~ /^-/) {
+    my $opt = shift @ARGV;
+
+    if ($opt eq '--') {
+        last;
+
+    } elsif ($opt eq '-n') {
+        $dryrun = 1;
+
+    } elsif ($opt eq '--allow-hidden') {
+        $allow_hidden = 1;
+
+    } elsif ($opt eq '--allow-dash') {
+        $allow_dash = 1;
+
+    } elsif ($opt eq '--allow-ext') {
+        $allow_ext = 1;
+
+    } elsif ($opt eq '--preserve-ext') {
+        $preserve_ext = 1;
+
+    } else {
+        die "Unknown option: $opt\n".
+            "Usage: rename [-n] [--allow-hidden] [--allow-dash] [--allow-ext | --preserve-ext] expr [files]\n";
+    }
+}
+
+if ($allow_ext && $preserve_ext) {
+    die "Options --allow-ext and --preserve-ext are mutually exclusive\n".
+        "Usage: rename [-n] [--allow-hidden] [--allow-dash] [--allow-ext | --preserve-ext] expr [files]\n";
+}
+
+sub split_ext {
+    my ($f) = @_;
+    # last-dot extension only; ext includes the dot, or '' if none
+    return ($1, ".$2") if $f =~ /^(.*)\.([^\/.]+)$/;
+    return ($f, '');
+}
+
+my $op = shift @ARGV or die "Usage: rename [-n] [--allow-hidden] [--allow-dash] [--allow-ext | --preserve-ext] expr [files]\n";
+
+# Fail fast if expr doesn't look like a rename expression.
+# This catches the common case where a filename got shifted into $op.
+if ($op !~ /^(?:s|tr|y)\b/ && $op !~ /^(?:s|tr|y)\W/) {
+    die "Bad expr: '$op'\n".
+        "It doesn't look like a Perl rename expression (s///, tr///, y///).\n".
+        "You probably forgot to quote the expr, or omitted it.\n".
+        "Example: rename 's/(S\\d{2}E\\d{2})\\./\\$1 - /' -- *\n";
+}
+
+if ($op =~ /^s(.)(.*?)\1(.*?)\1([a-z]*)$/i) {
+    my ($delim, $pat, $rep, $mods) = ($1, $2, $3, $4);
+
+    if ($mods =~ /g/ && $pat eq '.') {
+        die "Refusing expression '$op' ... global dot matches can erase filenames\n";
+    }
+}
+
+if ($op =~ /^s(.)(.*?)\1(.*?)\1([a-z]*)$/i) {
+    my ($delim, $pat, $rep, $mods) = ($1, $2, $3, $4);
+
+    my $num_caps = () = ($pat =~ /\((?!\?[:=!<])/g);  # naive count of capturing parens
+    if ($num_caps > 0 && $rep !~ /\$(?:\d+|\{?\w+\}?)/) {
+        die "Expression looks like it uses captures, but replacement has no \$1/\$2/... .\n".
+            "If you used double quotes, the shell may have expanded them. Use single quotes.\n";
+    }
+}
+
+if ($op =~ /^s(.)(.*?)\1(.*?)\1([a-z]*)$/i) {
+    my ($pat, $rep, $mods) = ($2, $3, $4);
+
+    if ($pat =~ /\((?!\?[:=!<])/ && $rep !~ /\$/ && $rep =~ /^[\s\-\._]*$/) {
+        die "Refusing '$op' ... replacement has no \$1 etc; likely shell-expanded.\n";
+    }
+}
+
+sub file_ext {
+    my ($f) = @_;
+    return '' if $f !~ /\.([^\/.]+)$/;   # no extension
+    return $1;
+}
+
+# If no file args remain, read from STDIN
+chomp(@ARGV = <STDIN>) unless @ARGV;
+
+# put these once, outside the loop (top-level)
+my $RED   = -t STDERR ? "\e[31m" : "";
+my $RESET = -t STDERR ? "\e[0m"  : "";
+
+sub skip_red {
+    my ($msg) = @_;
+    warn "${RED}SKIP: $msg${RESET}\n";
+}
+
+for (@ARGV) {
+    my $was = $_;
+
+    eval $op;
+    die $@ if $@;
+
+    next if $was eq $_;          # no change
+    my $new_name = $_;
+
+    # Disallow leading dash
+    if (!$allow_dash && $new_name =~ /^-/) {
+        skip_red("'$new_name' begins with '-' (use --allow-dash)");
+        next;
+    }
+
+    # Disallow hidden
+    if (!$allow_hidden && $new_name =~ /^\./) {
+        skip_red("'$new_name' is hidden (use --allow-hidden)");
+        next;
+    }
+
+    # Extension protection
+    if (!$allow_ext) {
+        my ($old_stem, $old_ext) = split_ext($was);
+        my ($new_stem, $new_ext) = split_ext($new_name);
+
+        if ($old_ext ne $new_ext) {
+
+            if ($preserve_ext && $old_ext ne '') {
+                my $candidate = $new_name;
+                $candidate =~ s/\.+$//;       # avoid trailing dots
+                $candidate =~ s/\.[^\/.]+$//; # strip any last-dot extension
+                $candidate .= $old_ext;       # restore original ext (includes '.')
+
+                # re-check constraints on candidate
+                if (!$allow_dash && $candidate =~ /^-/) {
+                    skip_red("'$candidate' begins with '-' (use --allow-dash)");
+                    next;
+                }
+                if (!$allow_hidden && $candidate =~ /^\./) {
+                    skip_red("'$candidate' is hidden (use --allow-hidden)");
+                    next;
+                }
+
+                if (-e $candidate) {
+                    skip_red("'$candidate' already exists, not renaming '$was'");
+                    next;
+                }
+
+                $new_name = $candidate;
+
+            } else {
+                skip_red("extension change '$was' -> '$new_name' (use --allow-ext, or --preserve-ext)");
+                next;
+            }
+        }
+    }
+
+    if (-e $new_name) {
+        skip_red("'$new_name' already exists, not renaming '$was'");
+        next;
+    }
+
+    if ($dryrun) {
+        print "$was -> $new_name\n";
+    } else {
+        rename($was, $new_name) or warn "${RED}ERROR: rename('$was','$new_name') failed: $!${RESET}\n";
+    }
+}
