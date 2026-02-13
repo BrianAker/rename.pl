@@ -1,0 +1,13 @@
+# macOS/editor noise
+.DS_Store
+*.swp
+*.swo
+
+# Test artifacts
+test/tmp/
+t/tmp/
+.tmp/
+
+# Test output files
+*.tap
+*.log

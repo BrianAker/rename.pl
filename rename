@@ -2,12 +2,14 @@
 # rename - Larry's filename fixer (+ -n dry-run)
 # Usage: rename [-n] expr [files]
 # If no files are given, reads newline-separated filenames from STDIN.
+use File::Find ();
 
 my $allow_hidden  = 0;
 my $allow_dash    = 0;
 my $allow_ext     = 0;
 my $preserve_ext  = 0;
 my $dryrun        = 0;
+my $recursive     = 0;
 
 # Parse leading options
 while (@ARGV && $ARGV[0] =~ /^-/) {
@@ -18,6 +20,9 @@ while (@ARGV && $ARGV[0] =~ /^-/) {
 
     } elsif ($opt eq '-n') {
         $dryrun = 1;
+
+    } elsif ($opt eq '--recursive') {
+        $recursive = 1;
 
     } elsif ($opt eq '--allow-hidden') {
         $allow_hidden = 1;
@@ -33,13 +38,13 @@ while (@ARGV && $ARGV[0] =~ /^-/) {
 
     } else {
         die "Unknown option: $opt\n".
-            "Usage: rename [-n] [--allow-hidden] [--allow-dash] [--allow-ext | --preserve-ext] expr [files]\n";
+            "Usage: rename [-n] [--recursive] [--allow-hidden] [--allow-dash] [--allow-ext | --preserve-ext] expr [files]\n";
     }
 }
 
 if ($allow_ext && $preserve_ext) {
     die "Options --allow-ext and --preserve-ext are mutually exclusive\n".
-        "Usage: rename [-n] [--allow-hidden] [--allow-dash] [--allow-ext | --preserve-ext] expr [files]\n";
+        "Usage: rename [-n] [--recursive] [--allow-hidden] [--allow-dash] [--allow-ext | --preserve-ext] expr [files]\n";
 }
 
 sub split_ext {
@@ -49,7 +54,13 @@ sub split_ext {
     return ($f, '');
 }
 
-my $op = shift @ARGV or die "Usage: rename [-n] [--allow-hidden] [--allow-dash] [--allow-ext | --preserve-ext] expr [files]\n";
+sub has_capture_group {
+    my ($pat) = @_;
+    # Heuristic: unescaped "(" not followed by ?: ?= ?! ?<
+    return $pat =~ /(?<!\\)\((?!\?[:=!<])/;
+}
+
+my $op = shift @ARGV or die "Usage: rename [-n] [--recursive] [--allow-hidden] [--allow-dash] [--allow-ext | --preserve-ext] expr [files]\n";
 
 # Fail fast if expr doesn't look like a rename expression.
 # This catches the common case where a filename got shifted into $op.
@@ -71,7 +82,7 @@ if ($op =~ /^s(.)(.*?)\1(.*?)\1([a-z]*)$/i) {
 if ($op =~ /^s(.)(.*?)\1(.*?)\1([a-z]*)$/i) {
     my ($delim, $pat, $rep, $mods) = ($1, $2, $3, $4);
 
-    my $num_caps = () = ($pat =~ /\((?!\?[:=!<])/g);  # naive count of capturing parens
+    my $num_caps = () = ($pat =~ /(?<!\\)\((?!\?[:=!<])/g);  # naive count of capturing parens
     if ($num_caps > 0 && $rep !~ /\$(?:\d+|\{?\w+\}?)/) {
         die "Expression looks like it uses captures, but replacement has no \$1/\$2/... .\n".
             "If you used double quotes, the shell may have expanded them. Use single quotes.\n";
@@ -81,7 +92,7 @@ if ($op =~ /^s(.)(.*?)\1(.*?)\1([a-z]*)$/i) {
 if ($op =~ /^s(.)(.*?)\1(.*?)\1([a-z]*)$/i) {
     my ($pat, $rep, $mods) = ($2, $3, $4);
 
-    if ($pat =~ /\((?!\?[:=!<])/ && $rep !~ /\$/ && $rep =~ /^[\s\-\._]*$/) {
+    if (has_capture_group($pat) && $rep !~ /\$/ && $rep =~ /^[\s\-\._]*$/) {
         die "Refusing '$op' ... replacement has no \$1 etc; likely shell-expanded.\n";
     }
 }
@@ -95,6 +106,42 @@ sub file_ext {
 # If no file args remain, read from STDIN
 chomp(@ARGV = <STDIN>) unless @ARGV;
 
+sub path_depth {
+    my ($p) = @_;
+    return () = $p =~ m{/}g;
+}
+
+if ($recursive) {
+    my @expanded;
+    my %seen;
+
+    for my $path (@ARGV) {
+        if (-d $path) {
+            File::Find::find(
+                {
+                    no_chdir => 1,
+                    wanted   => sub {
+                        my $name = $File::Find::name;
+                        return if $seen{$name}++;
+                        push @expanded, $name;
+                    },
+                },
+                $path
+            );
+            next;
+        }
+
+        next if $seen{$path}++;
+        push @expanded, $path;
+    }
+
+    # Rename deeper paths first so children are handled before parent dirs.
+    @ARGV = sort {
+        path_depth($b) <=> path_depth($a)
+            || $a cmp $b
+    } @expanded;
+}
+
 # put these once, outside the loop (top-level)
 my $RED   = -t STDERR ? "\e[31m" : "";
 my $RESET = -t STDERR ? "\e[0m"  : "";
@@ -106,21 +153,32 @@ sub skip_red {
 
 for (@ARGV) {
     my $was = $_;
+    my $prefix = '';
+
+    if ($recursive) {
+        my $i = rindex($was, '/');
+        if ($i >= 0) {
+            $prefix = substr($was, 0, $i + 1);
+            $_ = substr($was, $i + 1);
+        }
+    }
 
     eval $op;
     die $@ if $@;
 
-    next if $was eq $_;          # no change
-    my $new_name = $_;
+    my $new_name = $recursive ? "${prefix}$_" : $_;
+    next if $was eq $new_name;   # no change
+
+    my $new_component = $recursive ? $_ : $new_name;
 
     # Disallow leading dash
-    if (!$allow_dash && $new_name =~ /^-/) {
+    if (!$allow_dash && $new_component =~ /^-/) {
         skip_red("'$new_name' begins with '-' (use --allow-dash)");
         next;
     }
 
     # Disallow hidden
-    if (!$allow_hidden && $new_name =~ /^\./) {
+    if (!$allow_hidden && $new_component =~ /^\./) {
         skip_red("'$new_name' is hidden (use --allow-hidden)");
         next;
     }
@@ -138,12 +196,18 @@ for (@ARGV) {
                 $candidate =~ s/\.[^\/.]+$//; # strip any last-dot extension
                 $candidate .= $old_ext;       # restore original ext (includes '.')
 
+                my $candidate_component = $candidate;
+                if ($recursive) {
+                    my $j = rindex($candidate_component, '/');
+                    $candidate_component = substr($candidate_component, $j + 1) if $j >= 0;
+                }
+
                 # re-check constraints on candidate
-                if (!$allow_dash && $candidate =~ /^-/) {
+                if (!$allow_dash && $candidate_component =~ /^-/) {
                     skip_red("'$candidate' begins with '-' (use --allow-dash)");
                     next;
                 }
-                if (!$allow_hidden && $candidate =~ /^\./) {
+                if (!$allow_hidden && $candidate_component =~ /^\./) {
                     skip_red("'$candidate' is hidden (use --allow-hidden)");
                     next;
                 }
