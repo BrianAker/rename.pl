@@ -135,4 +135,33 @@ sub touch_files {
     ok(!-e "$dir/The Dog of Foo/The Dog of Foo (Unabridged).m4b", "old file name removed");
 }
 
+{
+    my $dir = tempdir(CLEANUP => 1);
+    mkdir "$dir/Bob Bob" or die "mkdir Bob Bob: $!";
+    mkdir "$dir/Bob Bob/Fix: Dog God" or die "mkdir Fix: Dog God: $!";
+    mkdir "$dir/Bob Bob/Fix: Dog God/Vol. 01 - Fix: Dog God" or die "mkdir Vol 01: $!";
+    mkdir "$dir/Bob Bob/Fix: Dog God/Vol. 02 - Fix: Dog God 2" or die "mkdir Vol 02: $!";
+    touch_files($dir, "Bob Bob/Fix: Dog God/Vol. 01 - Fix: Dog God/Fix: Dog God.m4b");
+    touch_files($dir, "Bob Bob/Fix: Dog God/Vol. 02 - Fix: Dog God 2/Fix: Dog God 2.m4b");
+
+    my ($code, $out) = run_rename(
+        dir  => $dir,
+        argv => [
+            's/Vol. 0/Vol. /',
+            '--',
+            'Bob Bob/Fix: Dog God/Vol. 01 - Fix: Dog God',
+            'Bob Bob/Fix: Dog God/Vol. 02 - Fix: Dog God 2',
+        ],
+    );
+
+    is($code, 0, "renaming dotted directory names succeeds without --allow-ext");
+    is($out, "", "no output on successful non-dry-run");
+    ok(-d "$dir/Bob Bob/Fix: Dog God/Vol. 1 - Fix: Dog God", "volume 01 directory renamed");
+    ok(-d "$dir/Bob Bob/Fix: Dog God/Vol. 2 - Fix: Dog God 2", "volume 02 directory renamed");
+    ok(-f "$dir/Bob Bob/Fix: Dog God/Vol. 1 - Fix: Dog God/Fix: Dog God.m4b", "file remains in renamed volume 1 directory");
+    ok(-f "$dir/Bob Bob/Fix: Dog God/Vol. 2 - Fix: Dog God 2/Fix: Dog God 2.m4b", "file remains in renamed volume 2 directory");
+    ok(!-e "$dir/Bob Bob/Fix: Dog God/Vol. 01 - Fix: Dog God", "old volume 01 directory removed");
+    ok(!-e "$dir/Bob Bob/Fix: Dog God/Vol. 02 - Fix: Dog God 2", "old volume 02 directory removed");
+}
+
 done_testing();

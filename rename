@@ -183,8 +183,8 @@ for (@ARGV) {
         next;
     }
 
-    # Extension protection
-    if (!$allow_ext) {
+    # Extension protection (files only)
+    if (!$allow_ext && !-d $was) {
         my ($old_stem, $old_ext) = split_ext($was);
         my ($new_stem, $new_ext) = split_ext($new_name);
 
