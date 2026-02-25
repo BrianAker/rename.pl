@@ -32,6 +32,10 @@ If no `files` are provided, `rename` reads newline-separated paths from STDIN.
   - Recursively process each provided directory argument.
   - Renames deeper paths before parent directories.
   - Applies expression to each path component basename, so parent path context is preserved.
+- `--type f|d`
+  - Exclude paths of the given type from renaming.
+  - `f` ignores regular files.
+  - `d` ignores directories.
 - `--allow-hidden`
   - Allow output names that begin with `.`.
 - `--allow-dash`
@@ -62,6 +66,18 @@ Recursive rename (directories and nested files):
 
 ```bash
 rename --recursive 's/ \(Unabridged\)//' -- "The Dog of Foo (Unabridged)"
+```
+
+Recursive rename but only files (skip directories):
+
+```bash
+rename --recursive --type d 's/ \(Unabridged\)//' -- "The Dog of Foo (Unabridged)"
+```
+
+Recursive rename but only directories (skip files):
+
+```bash
+rename --recursive --type f 's/ \(Unabridged\)//' -- "The Dog of Foo (Unabridged)"
 ```
 
 Allow extension changes:

@@ -10,6 +10,7 @@ my $allow_ext     = 0;
 my $preserve_ext  = 0;
 my $dryrun        = 0;
 my $recursive     = 0;
+my $ignore_type   = '';
 
 # Parse leading options
 while (@ARGV && $ARGV[0] =~ /^-/) {
@@ -23,6 +24,20 @@ while (@ARGV && $ARGV[0] =~ /^-/) {
 
     } elsif ($opt eq '--recursive') {
         $recursive = 1;
+
+    } elsif ($opt eq '--type') {
+        my $t = shift @ARGV;
+        defined $t or die "Option --type requires a value (f or d)\n".
+            "Usage: rename [-n] [--recursive] [--type f|d] [--allow-hidden] [--allow-dash] [--allow-ext | --preserve-ext] expr [files]\n";
+        ($t eq 'f' || $t eq 'd') or die "Invalid --type value '$t' (expected f or d)\n".
+            "Usage: rename [-n] [--recursive] [--type f|d] [--allow-hidden] [--allow-dash] [--allow-ext | --preserve-ext] expr [files]\n";
+        $ignore_type = $t;
+
+    } elsif ($opt =~ /^--type=(.+)$/) {
+        my $t = $1;
+        ($t eq 'f' || $t eq 'd') or die "Invalid --type value '$t' (expected f or d)\n".
+            "Usage: rename [-n] [--recursive] [--type f|d] [--allow-hidden] [--allow-dash] [--allow-ext | --preserve-ext] expr [files]\n";
+        $ignore_type = $t;
 
     } elsif ($opt eq '--allow-hidden') {
         $allow_hidden = 1;
@@ -38,13 +53,13 @@ while (@ARGV && $ARGV[0] =~ /^-/) {
 
     } else {
         die "Unknown option: $opt\n".
-            "Usage: rename [-n] [--recursive] [--allow-hidden] [--allow-dash] [--allow-ext | --preserve-ext] expr [files]\n";
+            "Usage: rename [-n] [--recursive] [--type f|d] [--allow-hidden] [--allow-dash] [--allow-ext | --preserve-ext] expr [files]\n";
     }
 }
 
 if ($allow_ext && $preserve_ext) {
     die "Options --allow-ext and --preserve-ext are mutually exclusive\n".
-        "Usage: rename [-n] [--recursive] [--allow-hidden] [--allow-dash] [--allow-ext | --preserve-ext] expr [files]\n";
+        "Usage: rename [-n] [--recursive] [--type f|d] [--allow-hidden] [--allow-dash] [--allow-ext | --preserve-ext] expr [files]\n";
 }
 
 sub split_ext {
@@ -60,7 +75,8 @@ sub has_capture_group {
     return $pat =~ /(?<!\\)\((?!\?[:=!<])/;
 }
 
-my $op = shift @ARGV or die "Usage: rename [-n] [--recursive] [--allow-hidden] [--allow-dash] [--allow-ext | --preserve-ext] expr [files]\n";
+my $op = shift @ARGV or die "Usage: rename [-n] [--recursive] [--type f|d] [--allow-hidden] [--allow-dash] [--allow-ext | --preserve-ext] expr [files]\n";
+shift @ARGV if @ARGV && $ARGV[0] eq '--';
 
 # Fail fast if expr doesn't look like a rename expression.
 # This catches the common case where a filename got shifted into $op.
@@ -111,6 +127,13 @@ sub path_depth {
     return () = $p =~ m{/}g;
 }
 
+sub split_parent_base {
+    my ($p) = @_;
+    my $i = rindex($p, '/');
+    return ('', $p) if $i < 0;
+    return (substr($p, 0, $i + 1), substr($p, $i + 1));
+}
+
 if ($recursive) {
     my @expanded;
     my %seen;
@@ -153,23 +176,20 @@ sub skip_red {
 
 for (@ARGV) {
     my $was = $_;
-    my $prefix = '';
 
-    if ($recursive) {
-        my $i = rindex($was, '/');
-        if ($i >= 0) {
-            $prefix = substr($was, 0, $i + 1);
-            $_ = substr($was, $i + 1);
-        }
-    }
+    next if $ignore_type eq 'f' && -f $was;
+    next if $ignore_type eq 'd' && -d $was;
+
+    my ($prefix, $base) = split_parent_base($was);
+    $_ = $base;
 
     eval $op;
     die $@ if $@;
 
-    my $new_name = $recursive ? "${prefix}$_" : $_;
+    my $new_name = "${prefix}$_";
     next if $was eq $new_name;   # no change
 
-    my $new_component = $recursive ? $_ : $new_name;
+    my $new_component = $_;
 
     # Disallow leading dash
     if (!$allow_dash && $new_component =~ /^-/) {
@@ -196,11 +216,7 @@ for (@ARGV) {
                 $candidate =~ s/\.[^\/.]+$//; # strip any last-dot extension
                 $candidate .= $old_ext;       # restore original ext (includes '.')
 
-                my $candidate_component = $candidate;
-                if ($recursive) {
-                    my $j = rindex($candidate_component, '/');
-                    $candidate_component = substr($candidate_component, $j + 1) if $j >= 0;
-                }
+                my (undef, $candidate_component) = split_parent_base($candidate);
 
                 # re-check constraints on candidate
                 if (!$allow_dash && $candidate_component =~ /^-/) {

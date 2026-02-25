@@ -164,4 +164,64 @@ sub touch_files {
     ok(!-e "$dir/Bob Bob/Fix: Dog God/Vol. 02 - Fix: Dog God 2", "old volume 02 directory removed");
 }
 
+{
+    my $dir = tempdir(CLEANUP => 1);
+    mkdir "$dir/DirME" or die "mkdir DirME: $!";
+    touch_files($dir, "DirME/files.1", "DirME/files.2", "DirME/files.3");
+
+    my ($code, $out) = run_rename(
+        dir  => $dir,
+        argv => [
+            's/^/\[Fox Foo\]/',
+            '--',
+            'DirME/files.1',
+            'DirME/files.2',
+            'DirME/files.3',
+        ],
+    );
+
+    is($code, 0, "renaming paths in a directory prefixes basenames only");
+    is($out, "", "no output on successful non-dry-run");
+    ok(-f "$dir/DirME/[Fox Foo]files.1", "first file renamed within DirME");
+    ok(-f "$dir/DirME/[Fox Foo]files.2", "second file renamed within DirME");
+    ok(-f "$dir/DirME/[Fox Foo]files.3", "third file renamed within DirME");
+    ok(!-e "$dir/DirME/files.1", "old first file removed");
+    ok(!-e "$dir/DirME/files.2", "old second file removed");
+    ok(!-e "$dir/DirME/files.3", "old third file removed");
+}
+
+{
+    my $dir = tempdir(CLEANUP => 1);
+    mkdir "$dir/TypeME (Unabridged)" or die "mkdir: $!";
+    touch_files($dir, "TypeME (Unabridged)/Track (Unabridged).m4b");
+
+    my ($code, $out) = run_rename(
+        dir  => $dir,
+        argv => [qw(--recursive --type d), 's/ \(Unabridged\)//', '--', 'TypeME (Unabridged)'],
+    );
+
+    is($code, 0, "--type d ignores directories");
+    is($out, "", "no output on successful non-dry-run");
+    ok(-d "$dir/TypeME (Unabridged)", "directory left unchanged");
+    ok(-f "$dir/TypeME (Unabridged)/Track.m4b", "file renamed");
+    ok(!-e "$dir/TypeME (Unabridged)/Track (Unabridged).m4b", "old file name removed");
+}
+
+{
+    my $dir = tempdir(CLEANUP => 1);
+    mkdir "$dir/TypeME (Unabridged)" or die "mkdir: $!";
+    touch_files($dir, "TypeME (Unabridged)/Track (Unabridged).m4b");
+
+    my ($code, $out) = run_rename(
+        dir  => $dir,
+        argv => [qw(--recursive --type f), 's/ \(Unabridged\)//', '--', 'TypeME (Unabridged)'],
+    );
+
+    is($code, 0, "--type f ignores files");
+    is($out, "", "no output on successful non-dry-run");
+    ok(-d "$dir/TypeME", "directory renamed");
+    ok(-f "$dir/TypeME/Track (Unabridged).m4b", "file left unchanged in renamed directory");
+    ok(!-e "$dir/TypeME (Unabridged)", "old directory name removed");
+}
+
 done_testing();
