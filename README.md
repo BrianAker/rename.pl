@@ -5,6 +5,7 @@
 ## Features
 
 - Perl rename expressions (`s///`, `tr///`, `y///`)
+- Multiple expression arguments, applied left to right
 - Dry-run mode (`-n`) to preview changes
 - Recursive processing (`--recursive`) for directory trees
 - Safety checks for:
@@ -19,7 +20,7 @@
 ## Usage
 
 ```bash
-rename [options] 'expr' [files...]
+rename [options] 'expr' ['expr' ...] [files...]
 ```
 
 If no `files` are provided, `rename` reads newline-separated paths from STDIN.
@@ -54,6 +55,12 @@ Dry-run rename:
 
 ```bash
 rename -n 's/foo/bar/' -- *
+```
+
+Apply multiple expressions in order:
+
+```bash
+rename -n 's/foo/baz/' 's/ /_/' -- "foo bar.txt"
 ```
 
 Remove ` (Unabridged)` from files:

@@ -41,6 +41,60 @@ sub touch_files {
 
 {
     my $dir = tempdir(CLEANUP => 1);
+    touch_files($dir, "foo bar.txt");
+    my ($code, $out) = run_rename(
+        dir  => $dir,
+        argv => [qw(-n), 's/foo/baz/', 's/ /_/', '--', 'foo bar.txt'],
+    );
+    is($code, 0, "supports multiple expr arguments");
+    is($out, "foo bar.txt -> baz_bar.txt\n", "applies multiple expressions in order");
+}
+
+{
+    my $dir = tempdir(CLEANUP => 1);
+    touch_files($dir, "foo.txt");
+    my ($code, $out) = run_rename(
+        dir  => $dir,
+        argv => [qw(-n), 's/foo/bar/', 's/bar/baz/', '--', 'foo.txt'],
+    );
+    is($code, 0, "supports ordered expression chaining");
+    is($out, "foo.txt -> baz.txt\n", "later expressions see earlier expression output");
+}
+
+{
+    my $dir = tempdir(CLEANUP => 1);
+    my @files = (
+        "foo_02.mkv",
+        "foo_02.srt",
+        "The_foo_02_cut.mp3",
+        "my_foo_02_notes.txt",
+        "foo_02_bonus_track.flac",
+    );
+    touch_files($dir, @files);
+    my ($code, $out) = run_rename(
+        dir  => $dir,
+        argv => [
+            qw(-n),
+            's/_/ /g',
+            's/foo 02/foo - S01E02/',
+            '--',
+            @files,
+        ],
+    );
+    is($code, 0, "supports multiple expressions for underscore cleanup and episode expansion");
+    is(
+        $out,
+        "foo_02.mkv -> foo - S01E02.mkv\n"
+            . "foo_02.srt -> foo - S01E02.srt\n"
+            . "The_foo_02_cut.mp3 -> The foo - S01E02 cut.mp3\n"
+            . "my_foo_02_notes.txt -> my foo - S01E02 notes.txt\n"
+            . "foo_02_bonus_track.flac -> foo - S01E02 bonus track.flac\n",
+        "applies the provided expressions in order across five matching files",
+    );
+}
+
+{
+    my $dir = tempdir(CLEANUP => 1);
     touch_files($dir, "Book (Unabridged).mp3");
     my ($code, $out) = run_rename(dir => $dir, argv => [qw(-n), 's/ \(Unabridged\)//', '--', 'Book (Unabridged).mp3']);
     is($code, 0, "handles escaped literal parentheses");

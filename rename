@@ -1,6 +1,6 @@
 #!/usr/bin/perl -w
 # rename - Larry's filename fixer (+ -n dry-run)
-# Usage: rename [-n] expr [files]
+# Usage: rename [-n] expr [expr ...] [files]
 # If no files are given, reads newline-separated filenames from STDIN.
 use File::Find ();
 
@@ -28,15 +28,15 @@ while (@ARGV && $ARGV[0] =~ /^-/) {
     } elsif ($opt eq '--type') {
         my $t = shift @ARGV;
         defined $t or die "Option --type requires a value (f or d)\n".
-            "Usage: rename [-n] [--recursive] [--type f|d] [--allow-hidden] [--allow-dash] [--allow-ext | --preserve-ext] expr [files]\n";
+            "Usage: rename [-n] [--recursive] [--type f|d] [--allow-hidden] [--allow-dash] [--allow-ext | --preserve-ext] expr [expr ...] [files]\n";
         ($t eq 'f' || $t eq 'd') or die "Invalid --type value '$t' (expected f or d)\n".
-            "Usage: rename [-n] [--recursive] [--type f|d] [--allow-hidden] [--allow-dash] [--allow-ext | --preserve-ext] expr [files]\n";
+            "Usage: rename [-n] [--recursive] [--type f|d] [--allow-hidden] [--allow-dash] [--allow-ext | --preserve-ext] expr [expr ...] [files]\n";
         $ignore_type = $t;
 
     } elsif ($opt =~ /^--type=(.+)$/) {
         my $t = $1;
         ($t eq 'f' || $t eq 'd') or die "Invalid --type value '$t' (expected f or d)\n".
-            "Usage: rename [-n] [--recursive] [--type f|d] [--allow-hidden] [--allow-dash] [--allow-ext | --preserve-ext] expr [files]\n";
+            "Usage: rename [-n] [--recursive] [--type f|d] [--allow-hidden] [--allow-dash] [--allow-ext | --preserve-ext] expr [expr ...] [files]\n";
         $ignore_type = $t;
 
     } elsif ($opt eq '--allow-hidden') {
@@ -53,13 +53,13 @@ while (@ARGV && $ARGV[0] =~ /^-/) {
 
     } else {
         die "Unknown option: $opt\n".
-            "Usage: rename [-n] [--recursive] [--type f|d] [--allow-hidden] [--allow-dash] [--allow-ext | --preserve-ext] expr [files]\n";
+            "Usage: rename [-n] [--recursive] [--type f|d] [--allow-hidden] [--allow-dash] [--allow-ext | --preserve-ext] expr [expr ...] [files]\n";
     }
 }
 
 if ($allow_ext && $preserve_ext) {
     die "Options --allow-ext and --preserve-ext are mutually exclusive\n".
-        "Usage: rename [-n] [--recursive] [--type f|d] [--allow-hidden] [--allow-dash] [--allow-ext | --preserve-ext] expr [files]\n";
+        "Usage: rename [-n] [--recursive] [--type f|d] [--allow-hidden] [--allow-dash] [--allow-ext | --preserve-ext] expr [expr ...] [files]\n";
 }
 
 sub split_ext {
@@ -75,43 +75,59 @@ sub has_capture_group {
     return $pat =~ /(?<!\\)\((?!\?[:=!<])/;
 }
 
-my $op = shift @ARGV or die "Usage: rename [-n] [--recursive] [--type f|d] [--allow-hidden] [--allow-dash] [--allow-ext | --preserve-ext] expr [files]\n";
+sub looks_like_expr {
+    my ($expr) = @_;
+    return defined $expr && ($expr =~ /^(?:s|tr|y)\b/ || $expr =~ /^(?:s|tr|y)\W/);
+}
+
+sub validate_expr {
+    my ($expr) = @_;
+
+    if (!looks_like_expr($expr)) {
+        die "Bad expr: '$expr'\n".
+            "It doesn't look like a Perl rename expression (s///, tr///, y///).\n".
+            "You probably forgot to quote the expr, or omitted it.\n".
+            "Example: rename 's/(S\\d{2}E\\d{2})\\./\\$1 - /' -- *\n";
+    }
+
+    if ($expr =~ /^s(.)(.*?)\1(.*?)\1([a-z]*)$/i) {
+        my ($delim, $pat, $rep, $mods) = ($1, $2, $3, $4);
+
+        if ($mods =~ /g/ && $pat eq '.') {
+            die "Refusing expression '$expr' ... global dot matches can erase filenames\n";
+        }
+    }
+
+    if ($expr =~ /^s(.)(.*?)\1(.*?)\1([a-z]*)$/i) {
+        my ($delim, $pat, $rep, $mods) = ($1, $2, $3, $4);
+
+        my $num_caps = () = ($pat =~ /(?<!\\)\((?!\?[:=!<])/g);  # naive count of capturing parens
+        if ($num_caps > 0 && $rep !~ /\$(?:\d+|\{?\w+\}?)/) {
+            die "Expression looks like it uses captures, but replacement has no \$1/\$2/... .\n".
+                "If you used double quotes, the shell may have expanded them. Use single quotes.\n";
+        }
+    }
+
+    if ($expr =~ /^s(.)(.*?)\1(.*?)\1([a-z]*)$/i) {
+        my ($pat, $rep, $mods) = ($2, $3, $4);
+
+        if (has_capture_group($pat) && $rep !~ /\$/ && $rep =~ /^[\s\-\._]*$/) {
+            die "Refusing '$expr' ... replacement has no \$1 etc; likely shell-expanded.\n";
+        }
+    }
+}
+
+my @ops;
+
+while (@ARGV && $ARGV[0] ne '--' && looks_like_expr($ARGV[0])) {
+    push @ops, shift @ARGV;
+}
+
+@ops or die "Usage: rename [-n] [--recursive] [--type f|d] [--allow-hidden] [--allow-dash] [--allow-ext | --preserve-ext] expr [expr ...] [files]\n";
+
 shift @ARGV if @ARGV && $ARGV[0] eq '--';
 
-# Fail fast if expr doesn't look like a rename expression.
-# This catches the common case where a filename got shifted into $op.
-if ($op !~ /^(?:s|tr|y)\b/ && $op !~ /^(?:s|tr|y)\W/) {
-    die "Bad expr: '$op'\n".
-        "It doesn't look like a Perl rename expression (s///, tr///, y///).\n".
-        "You probably forgot to quote the expr, or omitted it.\n".
-        "Example: rename 's/(S\\d{2}E\\d{2})\\./\\$1 - /' -- *\n";
-}
-
-if ($op =~ /^s(.)(.*?)\1(.*?)\1([a-z]*)$/i) {
-    my ($delim, $pat, $rep, $mods) = ($1, $2, $3, $4);
-
-    if ($mods =~ /g/ && $pat eq '.') {
-        die "Refusing expression '$op' ... global dot matches can erase filenames\n";
-    }
-}
-
-if ($op =~ /^s(.)(.*?)\1(.*?)\1([a-z]*)$/i) {
-    my ($delim, $pat, $rep, $mods) = ($1, $2, $3, $4);
-
-    my $num_caps = () = ($pat =~ /(?<!\\)\((?!\?[:=!<])/g);  # naive count of capturing parens
-    if ($num_caps > 0 && $rep !~ /\$(?:\d+|\{?\w+\}?)/) {
-        die "Expression looks like it uses captures, but replacement has no \$1/\$2/... .\n".
-            "If you used double quotes, the shell may have expanded them. Use single quotes.\n";
-    }
-}
-
-if ($op =~ /^s(.)(.*?)\1(.*?)\1([a-z]*)$/i) {
-    my ($pat, $rep, $mods) = ($2, $3, $4);
-
-    if (has_capture_group($pat) && $rep !~ /\$/ && $rep =~ /^[\s\-\._]*$/) {
-        die "Refusing '$op' ... replacement has no \$1 etc; likely shell-expanded.\n";
-    }
-}
+validate_expr($_) for @ops;
 
 sub file_ext {
     my ($f) = @_;
@@ -183,8 +199,10 @@ for (@ARGV) {
     my ($prefix, $base) = split_parent_base($was);
     $_ = $base;
 
-    eval $op;
-    die $@ if $@;
+    for my $op (@ops) {
+        eval $op;
+        die $@ if $@;
+    }
 
     my $new_name = "${prefix}$_";
     next if $was eq $new_name;   # no change
