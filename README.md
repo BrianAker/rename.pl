@@ -24,6 +24,7 @@ rename [options] 'expr' ['expr' ...] [files...]
 ```
 
 If no `files` are provided, `rename` reads newline-separated paths from STDIN.
+When `--` is present, everything before it is parsed as CLI options or expression tokens, and everything after it is treated as file arguments.
 
 ### Options
 
@@ -47,7 +48,10 @@ If no `files` are provided, `rename` reads newline-separated paths from STDIN.
   - Keep original extension when a rename would change it.
   - Mutually exclusive with `--allow-ext`.
 - `--`
-  - End option parsing (useful before globs or filenames starting with `-`).
+  - End option and expression parsing.
+  - Everything after `--` is treated as a file argument.
+- `__underscore`
+  - Built-in expression alias for `s/_/ /g`.
 
 ## Examples
 
@@ -61,6 +65,12 @@ Apply multiple expressions in order:
 
 ```bash
 rename -n 's/foo/baz/' 's/ /_/' -- "foo bar.txt"
+```
+
+Use the built-in underscore alias:
+
+```bash
+rename -n __underscore -- foo_bar.txt
 ```
 
 Remove ` (Unabridged)` from files:

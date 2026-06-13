@@ -1,6 +1,6 @@
 #!/usr/bin/perl -w
 # rename - Larry's filename fixer (+ -n dry-run)
-# Usage: rename [-n] expr [expr ...] [files]
+# Usage: rename [options and exprs ...] -- [files ...]
 # If no files are given, reads newline-separated filenames from STDIN.
 use File::Find ();
 
@@ -11,55 +11,56 @@ my $preserve_ext  = 0;
 my $dryrun        = 0;
 my $recursive     = 0;
 my $ignore_type   = '';
+my @raw_argv      = @ARGV;
 
-# Parse leading options
-while (@ARGV && $ARGV[0] =~ /^-/) {
-    my $opt = shift @ARGV;
+sub usage {
+    return "Usage: rename [-n] [--recursive] [--type f|d] [--allow-hidden] [--allow-dash] [--allow-ext | --preserve-ext] expr [expr ...] [-- files ...]\n";
+}
 
-    if ($opt eq '--') {
-        last;
+sub parse_option {
+    my ($args_ref, $index_ref) = @_;
+    my $opt = $args_ref->[$$index_ref];
 
-    } elsif ($opt eq '-n') {
+    if ($opt eq '-n') {
         $dryrun = 1;
+        return 1;
 
     } elsif ($opt eq '--recursive') {
         $recursive = 1;
+        return 1;
 
     } elsif ($opt eq '--type') {
-        my $t = shift @ARGV;
-        defined $t or die "Option --type requires a value (f or d)\n".
-            "Usage: rename [-n] [--recursive] [--type f|d] [--allow-hidden] [--allow-dash] [--allow-ext | --preserve-ext] expr [expr ...] [files]\n";
-        ($t eq 'f' || $t eq 'd') or die "Invalid --type value '$t' (expected f or d)\n".
-            "Usage: rename [-n] [--recursive] [--type f|d] [--allow-hidden] [--allow-dash] [--allow-ext | --preserve-ext] expr [expr ...] [files]\n";
+        $$index_ref++;
+        my $t = $args_ref->[$$index_ref];
+        defined $t or die "Option --type requires a value (f or d)\n" . usage();
+        ($t eq 'f' || $t eq 'd') or die "Invalid --type value '$t' (expected f or d)\n" . usage();
         $ignore_type = $t;
+        return 1;
 
     } elsif ($opt =~ /^--type=(.+)$/) {
         my $t = $1;
-        ($t eq 'f' || $t eq 'd') or die "Invalid --type value '$t' (expected f or d)\n".
-            "Usage: rename [-n] [--recursive] [--type f|d] [--allow-hidden] [--allow-dash] [--allow-ext | --preserve-ext] expr [expr ...] [files]\n";
+        ($t eq 'f' || $t eq 'd') or die "Invalid --type value '$t' (expected f or d)\n" . usage();
         $ignore_type = $t;
+        return 1;
 
     } elsif ($opt eq '--allow-hidden') {
         $allow_hidden = 1;
+        return 1;
 
     } elsif ($opt eq '--allow-dash') {
         $allow_dash = 1;
+        return 1;
 
     } elsif ($opt eq '--allow-ext') {
         $allow_ext = 1;
+        return 1;
 
     } elsif ($opt eq '--preserve-ext') {
         $preserve_ext = 1;
-
-    } else {
-        die "Unknown option: $opt\n".
-            "Usage: rename [-n] [--recursive] [--type f|d] [--allow-hidden] [--allow-dash] [--allow-ext | --preserve-ext] expr [expr ...] [files]\n";
+        return 1;
     }
-}
 
-if ($allow_ext && $preserve_ext) {
-    die "Options --allow-ext and --preserve-ext are mutually exclusive\n".
-        "Usage: rename [-n] [--recursive] [--type f|d] [--allow-hidden] [--allow-dash] [--allow-ext | --preserve-ext] expr [expr ...] [files]\n";
+    return 0;
 }
 
 sub split_ext {
@@ -78,6 +79,13 @@ sub has_capture_group {
 sub looks_like_expr {
     my ($expr) = @_;
     return defined $expr && ($expr =~ /^(?:s|tr|y)\b/ || $expr =~ /^(?:s|tr|y)\W/);
+}
+
+sub resolve_expr {
+    my ($expr) = @_;
+
+    return 's/_/ /g' if defined $expr && $expr eq '__underscore';
+    return $expr;
 }
 
 sub validate_expr {
@@ -118,16 +126,53 @@ sub validate_expr {
 }
 
 my @ops;
+my @files;
+my $saw_double_dash = 0;
 
-while (@ARGV && $ARGV[0] ne '--' && looks_like_expr($ARGV[0])) {
-    push @ops, shift @ARGV;
+for (my $i = 0; $i < @ARGV; $i++) {
+    my $arg = $ARGV[$i];
+
+    if ($arg eq '--') {
+        @files = @ARGV[$i + 1 .. $#ARGV];
+        $saw_double_dash = 1;
+        last;
+    }
+
+    if ($arg =~ /^-/ && parse_option(\@ARGV, \$i)) {
+        next;
+    }
+
+    push @ops, resolve_expr($arg);
 }
 
-@ops or die "Usage: rename [-n] [--recursive] [--type f|d] [--allow-hidden] [--allow-dash] [--allow-ext | --preserve-ext] expr [expr ...] [files]\n";
+if (!$saw_double_dash) {
+    @ops = ();
+    @files = ();
+    my @fallback_argv = @raw_argv;
 
-shift @ARGV if @ARGV && $ARGV[0] eq '--';
+    while (@fallback_argv && $fallback_argv[0] =~ /^-/) {
+        my $idx = 0;
+        my $handled = parse_option(\@fallback_argv, \$idx);
+        $handled or die "Unknown option: $fallback_argv[0]\n" . usage();
+        splice @fallback_argv, 0, $idx + 1;
+    }
+
+    while (@fallback_argv && looks_like_expr($fallback_argv[0])) {
+        push @ops, resolve_expr(shift @fallback_argv);
+    }
+
+    @files = @fallback_argv;
+}
+
+@ops or die usage();
+
+if ($allow_ext && $preserve_ext) {
+    die "Options --allow-ext and --preserve-ext are mutually exclusive\n" . usage();
+}
 
 validate_expr($_) for @ops;
+
+@ARGV = @files;
 
 sub file_ext {
     my ($f) = @_;

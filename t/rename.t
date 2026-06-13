@@ -52,6 +52,17 @@ sub touch_files {
 
 {
     my $dir = tempdir(CLEANUP => 1);
+    touch_files($dir, "foo_bar.txt");
+    my ($code, $out) = run_rename(
+        dir  => $dir,
+        argv => [qw(-n __underscore --), 'foo_bar.txt'],
+    );
+    is($code, 0, "supports built-in expr aliases before --");
+    is($out, "foo_bar.txt -> foo bar.txt\n", "__underscore expands to underscore-to-space rename");
+}
+
+{
+    my $dir = tempdir(CLEANUP => 1);
     touch_files($dir, "foo.txt");
     my ($code, $out) = run_rename(
         dir  => $dir,
@@ -91,6 +102,17 @@ sub touch_files {
             . "foo_02_bonus_track.flac -> foo - S01E02 bonus track.flac\n",
         "applies the provided expressions in order across five matching files",
     );
+}
+
+{
+    my $dir = tempdir(CLEANUP => 1);
+    touch_files($dir, "foo_02.txt");
+    my ($code, $out) = run_rename(
+        dir  => $dir,
+        argv => [qw(-n __underscore), 's/foo 02/foo - S01E02/', '--', 'foo_02.txt'],
+    );
+    is($code, 0, "supports mixing built-in and Perl expressions before --");
+    is($out, "foo_02.txt -> foo - S01E02.txt\n", "applies aliases and Perl expressions before file arguments");
 }
 
 {
