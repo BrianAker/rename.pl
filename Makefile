@@ -1,4 +1,4 @@
-.PHONY: test install
+.PHONY: test install install-hooks
 
 PREFIX ?= /usr/local
 BINDIR ?= $(PREFIX)/bin
@@ -12,3 +12,8 @@ test:
 install:
 	@mkdir -p "$(BINDIR)"
 	@install -m 0755 "$(PROGRAM)" "$(BINDIR)/$(PROGRAM)"
+
+install-hooks:
+	@chmod +x .githooks/pre-commit script/update-version
+	@git config core.hooksPath .githooks
+	@echo "Configured git hooks to use .githooks"

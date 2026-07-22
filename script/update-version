@@ -1,0 +1,100 @@
+#!/usr/bin/perl
+
+use strict;
+use warnings;
+
+use File::Basename qw(dirname);
+use File::Spec;
+use POSIX qw(strftime);
+
+my $root = $ENV{VERSION_REPO_ROOT};
+
+if (!defined $root || $root eq '') {
+    my $script_dir = dirname(File::Spec->rel2abs($0));
+    $root = File::Spec->catdir($script_dir, File::Spec->updir);
+}
+
+my $targets_file = $ENV{VERSION_TARGETS_FILE}
+    || File::Spec->catfile($root, '.version-files');
+my $version_file = $ENV{VERSION_FILE}
+    || File::Spec->catfile($root, 'VERSION');
+my $today = $ENV{VERSION_DATE} || strftime('%Y.%m.%d', localtime);
+
+sub slurp {
+    my ($path) = @_;
+    open my $fh, '<', $path or die "open '$path': $!";
+    local $/;
+    my $content = <$fh>;
+    close $fh or die "close '$path': $!";
+    return $content;
+}
+
+sub spew {
+    my ($path, $content) = @_;
+    open my $fh, '>', $path or die "write '$path': $!";
+    print {$fh} $content or die "write '$path': $!";
+    close $fh or die "close '$path': $!";
+}
+
+sub rel_path {
+    my ($path) = @_;
+    return File::Spec->abs2rel($path, $root);
+}
+
+sub read_targets {
+    my ($path) = @_;
+    my @targets;
+
+    if (-f $path) {
+        my $content = slurp($path);
+        for my $line (split /\n/, $content) {
+            $line =~ s/\r$//;
+            $line =~ s/^\s+//;
+            $line =~ s/\s+$//;
+            next if $line eq '' || $line =~ /^#/;
+            push @targets, File::Spec->catfile($root, $line);
+        }
+    }
+
+    my %seen;
+    my @ordered = grep { !$seen{$_}++ } ($version_file, @targets);
+    return @ordered;
+}
+
+my $current = -f $version_file ? slurp($version_file) : '';
+$current =~ s/\s+\z//;
+
+my ($major, $minor);
+if ($current eq '') {
+    $major = 1;
+    $minor = 0;
+} elsif ($current =~ /^\d{4}\.\d{2}\.\d{2}-(\d+)\.(\d+)$/) {
+    ($major, $minor) = ($1, $2);
+} else {
+    die "VERSION must match YYYY.MM.DD-major.minor, found '$current'\n";
+}
+
+$minor++;
+my $next_version = sprintf('%s-%d.%d', $today, $major, $minor);
+
+my @targets = read_targets($targets_file);
+for my $target (@targets) {
+    if (rel_path($target) eq 'VERSION') {
+        spew($target, "$next_version\n");
+        next;
+    }
+
+    -f $target or die "Version target '" . rel_path($target) . "' does not exist\n";
+    my $content = slurp($target);
+    my $count = ($content =~ s/\b\d{4}\.\d{2}\.\d{2}-\d+\.\d+\b/$next_version/g);
+    $count or die "No version string found in '" . rel_path($target) . "'\n";
+    spew($target, $content);
+}
+
+exit 0 if $ENV{VERSION_NO_STAGE};
+
+my @stage_paths = map { rel_path($_) } @targets;
+system('git', '-C', $root, 'add', @stage_paths) == 0
+    or die "git add failed while staging updated version files\n";
+
+exit 0;

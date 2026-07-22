@@ -7,6 +7,7 @@
 - Perl rename expressions (`s///`, `tr///`, `y///`)
 - Multiple expression arguments, applied left to right
 - Dry-run mode (`-n`) to preview changes
+- Commit-time version bumping via a tracked pre-commit hook
 - Recursive processing (`--recursive`) for directory trees
 - Safety checks for:
   - extension changes
@@ -135,6 +136,14 @@ Install using an explicit bin directory:
 make install BINDIR=/custom/bin
 ```
 
+Enable the repo's tracked git hook:
+
+```bash
+make install-hooks
+```
+
+This configures `core.hooksPath` to use `.githooks/`.
+
 ## Test
 
 Run test suite:
@@ -144,6 +153,36 @@ make test
 ```
 
 Tests use `Test::More` and run via `prove`.
+
+## Versioning
+
+The repo keeps the current version in [VERSION](/Users/brian/Documents/rename.pl/VERSION) using:
+
+```text
+YYYY.MM.DD-major.minor
+```
+
+Example:
+
+```text
+2026.07.16-1.7
+```
+
+Rules:
+
+- The `major` number is managed by hand.
+- The `minor` number is incremented automatically by the pre-commit hook.
+- The date portion is rewritten to the current local date on each bump.
+
+The hook runs [script/update-version](/Users/brian/Documents/rename.pl/script/update-version), which:
+
+- Reads the current version from `VERSION`
+- Increments the minor number
+- Rewrites `VERSION`
+- Updates every file listed in [.version-files](/Users/brian/Documents/rename.pl/.version-files)
+- Stages the updated files so the commit includes the new version
+
+To sync app manifests later, add their repo-relative paths to `.version-files`. Any listed file other than `VERSION` will have existing version strings in this format replaced with the new value.
 
 ## License
 
